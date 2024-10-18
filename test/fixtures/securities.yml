@@ -1,0 +1,7 @@
+aapl:
+  ticker: AAPL
+  name: Apple
+
+msft:
+  ticker: MSFT
+  name: Microsoft

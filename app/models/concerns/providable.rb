@@ -6,12 +6,26 @@ module Providable
   extend ActiveSupport::Concern
 
   class_methods do
+    def security_prices_provider
+      synth_provider
+    end
+
     def exchange_rates_provider
-      Provider::Synth.new
+      synth_provider
     end
 
     def git_repository_provider
       Provider::Github.new
     end
+
+    def synth_provider
+      api_key = self_hosted? ? Setting.synth_api_key : ENV["SYNTH_API_KEY"]
+      api_key.present? ? Provider::Synth.new(api_key) : nil
+    end
+
+    private
+      def self_hosted?
+        Rails.application.config.app_mode.self_hosted?
+      end
   end
 end

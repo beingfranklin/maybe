@@ -40,7 +40,7 @@ class TimeSeries::Value
 
     def value_must_be_of_known_type
       unless value.is_a?(Money) || value.is_a?(Numeric)
-        errors.add :value, "must be a Money or Numeric"
+        errors.add :value, :must_be_a_money_or_numeric
       end
     end
 end

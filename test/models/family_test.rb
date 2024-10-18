@@ -2,129 +2,164 @@ require "test_helper"
 require "csv"
 
 class FamilyTest < ActiveSupport::TestCase
+  include Account::EntriesTestHelper
+
   def setup
-    @family = families(:dylan_family)
-
-    @family.accounts.each do |account|
-      account.sync
-    end
-
-    # See this Google Sheet for calculations and expected results for dylan_family:
-    # https://docs.google.com/spreadsheets/d/18LN5N-VLq4b49Mq1fNwF7_eBiHSQB46qQduRtdAEN98/edit?usp=sharing
-    @expected_snapshots = CSV.read("test/fixtures/family/expected_snapshots.csv", headers: true).map do |row|
-      {
-        "date" => (Date.current + row["date_offset"].to_i.days).to_date,
-        "net_worth" => row["net_worth"],
-        "assets" => row["assets"],
-        "liabilities" => row["liabilities"],
-        "rolling_spend" => row["rolling_spend"],
-        "rolling_income" => row["rolling_income"],
-        "savings_rate" => row["savings_rate"]
-      }
-    end
+    @family = families :empty
   end
 
-  test "should have many users" do
-    assert @family.users.size > 0
-    assert @family.users.include?(users(:family_admin))
+  test "calculates assets" do
+    assert_equal Money.new(0, @family.currency), @family.assets
+
+    create_account(balance: 1000, accountable: Depository.new)
+    create_account(balance: 5000, accountable: OtherAsset.new)
+    create_account(balance: 10000, accountable: CreditCard.new) # ignored
+
+    assert_equal Money.new(1000 + 5000, @family.currency), @family.assets
   end
 
-  test "should have many accounts" do
-    assert @family.accounts.size > 0
+  test "calculates liabilities" do
+    assert_equal Money.new(0, @family.currency), @family.liabilities
+
+    create_account(balance: 1000, accountable: CreditCard.new)
+    create_account(balance: 5000, accountable: OtherLiability.new)
+    create_account(balance: 10000, accountable: Depository.new) # ignored
+
+    assert_equal Money.new(1000 + 5000, @family.currency), @family.liabilities
   end
 
-  test "should destroy dependent users" do
-    assert_difference("User.count", -@family.users.count) do
-      @family.destroy
-    end
-  end
+  test "calculates net worth" do
+    assert_equal Money.new(0, @family.currency), @family.net_worth
 
-  test "should destroy dependent accounts" do
-    assert_difference("Account.count", -@family.accounts.count) do
-      @family.destroy
-    end
-  end
+    create_account(balance: 1000, accountable: CreditCard.new)
+    create_account(balance: 50000, accountable: Depository.new)
 
-  test "should destroy dependent transaction categories" do
-    assert_difference("Transaction::Category.count", -@family.transaction_categories.count) do
-      @family.destroy
-    end
-  end
-
-  test "should destroy dependent merchants" do
-    assert_difference("Transaction::Merchant.count", -@family.transaction_merchants.count) do
-      @family.destroy
-    end
-  end
-
-  test "should calculate total assets" do
-    expected = @expected_snapshots.last["assets"].to_d
-    assert_equal Money.new(expected), @family.assets
-  end
-
-  test "should calculate total liabilities" do
-    expected = @expected_snapshots.last["liabilities"].to_d
-    assert_equal Money.new(expected), @family.liabilities
-  end
-
-  test "should calculate net worth" do
-    expected = @expected_snapshots.last["net_worth"].to_d
-    assert_equal Money.new(expected), @family.net_worth
-  end
-
-  test "should calculate snapshot correctly" do
-    asset_series = @family.snapshot[:asset_series]
-    liability_series = @family.snapshot[:liability_series]
-    net_worth_series = @family.snapshot[:net_worth_series]
-
-    assert_equal @expected_snapshots.count, asset_series.values.count
-    assert_equal @expected_snapshots.count, liability_series.values.count
-    assert_equal @expected_snapshots.count, net_worth_series.values.count
-
-    @expected_snapshots.each_with_index do |row, index|
-      expected_assets = TimeSeries::Value.new(date: row["date"], value: Money.new(row["assets"].to_d))
-      expected_liabilities = TimeSeries::Value.new(date: row["date"], value: Money.new(row["liabilities"].to_d))
-      expected_net_worth = TimeSeries::Value.new(date: row["date"], value: Money.new(row["net_worth"].to_d))
-
-      assert_in_delta expected_assets.value.amount, Money.new(asset_series.values[index].value).amount, 0.01
-      assert_in_delta expected_liabilities.value.amount, Money.new(liability_series.values[index].value).amount, 0.01
-      assert_in_delta expected_net_worth.value.amount, Money.new(net_worth_series.values[index].value).amount, 0.01
-    end
-  end
-
-  test "should calculate transaction snapshot correctly" do
-    spending_series = @family.snapshot_transactions[:spending_series]
-    income_series = @family.snapshot_transactions[:income_series]
-    savings_rate_series = @family.snapshot_transactions[:savings_rate_series]
-
-    assert_equal @expected_snapshots.count, spending_series.values.count
-    assert_equal @expected_snapshots.count, income_series.values.count
-    assert_equal @expected_snapshots.count, savings_rate_series.values.count
-
-    @expected_snapshots.each_with_index do |row, index|
-      expected_spending = TimeSeries::Value.new(date: row["date"], value: Money.new(row["rolling_spend"].to_d))
-      expected_income = TimeSeries::Value.new(date: row["date"], value: Money.new(row["rolling_income"].to_d))
-      expected_savings_rate = TimeSeries::Value.new(date: row["date"], value: Money.new(row["savings_rate"].to_d))
-
-      assert_in_delta expected_spending.value.amount, Money.new(spending_series.values[index].value).amount, 0.01
-      assert_in_delta expected_income.value.amount, Money.new(income_series.values[index].value).amount, 0.01
-      assert_in_delta expected_savings_rate.value.amount, savings_rate_series.values[index].value, 0.01
-    end
+    assert_equal Money.new(50000 - 1000, @family.currency), @family.net_worth
   end
 
   test "should exclude disabled accounts from calculations" do
-    assets_before = @family.assets
-    liabilities_before = @family.liabilities
-    net_worth_before = @family.net_worth
+    cc = create_account(balance: 1000, accountable: CreditCard.new)
+    create_account(balance: 50000, accountable: Depository.new)
 
-    disabled_checking = accounts(:checking)
-    disabled_cc = accounts(:credit_card)
+    assert_equal Money.new(50000 - 1000, @family.currency), @family.net_worth
 
-    disabled_checking.update!(is_active: false)
-    disabled_cc.update!(is_active: false)
+    cc.update! is_active: false
 
-    assert_equal assets_before - disabled_checking.balance, @family.assets
-    assert_equal liabilities_before - disabled_cc.balance, @family.liabilities
-    assert_equal net_worth_before - disabled_checking.balance + disabled_cc.balance, @family.net_worth
+    assert_equal Money.new(50000, @family.currency), @family.net_worth
   end
+
+  test "needs sync if last family sync was before today" do
+    assert @family.needs_sync?
+
+    @family.update! last_synced_at: Time.now
+
+    assert_not @family.needs_sync?
+  end
+
+  test "syncs active accounts" do
+    account = create_account(balance: 1000, accountable: CreditCard.new, is_active: false)
+
+    Account.any_instance.expects(:sync_later).never
+
+    @family.sync
+
+    account.update! is_active: true
+
+    Account.any_instance.expects(:needs_sync?).once.returns(true)
+    Account.any_instance.expects(:last_sync_date).once.returns(2.days.ago.to_date)
+    Account.any_instance.expects(:sync_later).with(start_date: 2.days.ago.to_date).once
+
+    @family.sync
+  end
+
+  test "calculates snapshot" do
+    asset = create_account(balance: 500, accountable: Depository.new)
+    liability = create_account(balance: 100, accountable: CreditCard.new)
+
+    asset.balances.create! date: 1.day.ago.to_date, currency: "USD", balance: 450
+    asset.balances.create! date: Date.current, currency: "USD", balance: 500
+
+    liability.balances.create! date: 1.day.ago.to_date, currency: "USD", balance: 50
+    liability.balances.create! date: Date.current, currency: "USD", balance: 100
+
+    expected_asset_series = [
+      { date: 1.day.ago.to_date, value: Money.new(450) },
+      { date: Date.current, value: Money.new(500) }
+    ]
+
+    expected_liability_series = [
+      { date: 1.day.ago.to_date, value: Money.new(50) },
+      { date: Date.current, value: Money.new(100) }
+    ]
+
+    expected_net_worth_series = [
+      { date: 1.day.ago.to_date, value: Money.new(450 - 50) },
+      { date: Date.current, value: Money.new(500 - 100) }
+    ]
+
+    assert_equal expected_asset_series, @family.snapshot[:asset_series].values.map { |v| { date: v.date, value: v.value } }
+    assert_equal expected_liability_series, @family.snapshot[:liability_series].values.map { |v| { date: v.date, value: v.value } }
+    assert_equal expected_net_worth_series, @family.snapshot[:net_worth_series].values.map { |v| { date: v.date, value: v.value } }
+  end
+
+  test "calculates top movers" do
+    checking_account = create_account(balance: 500, accountable: Depository.new)
+    savings_account = create_account(balance: 1000, accountable: Depository.new)
+    create_transaction(account: checking_account, date: 2.days.ago.to_date, amount: -1000)
+    create_transaction(account: checking_account, date: 1.day.ago.to_date, amount: 10)
+    create_transaction(account: savings_account, date: 2.days.ago.to_date, amount: -5000)
+
+    zero_income_zero_expense_account = create_account(balance: 200, accountable: Depository.new)
+    create_transaction(account: zero_income_zero_expense_account, amount: 0)
+
+    snapshot = @family.snapshot_account_transactions
+    top_spenders = snapshot[:top_spenders]
+    top_earners = snapshot[:top_earners]
+    top_savers = snapshot[:top_savers]
+
+    assert_equal [ 10 ], top_spenders.map(&:spending)
+    assert_equal [ 5000, 1000 ], top_earners.map(&:income)
+    assert_equal [ 1, 0.99 ], top_savers.map(&:savings_rate)
+  end
+
+
+  test "calculates rolling transaction totals" do
+    account = create_account(balance: 1000, accountable: Depository.new)
+    create_transaction(account: account, date: 2.days.ago.to_date, amount: -500)
+    create_transaction(account: account, date: 1.day.ago.to_date, amount: 100)
+    create_transaction(account: account, date: Date.current, amount: 20)
+
+    snapshot = @family.snapshot_transactions
+
+    expected_income_series = [
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 500, 500, 500
+    ]
+
+    assert_equal expected_income_series, snapshot[:income_series].values.map(&:value).map(&:amount)
+
+    expected_spending_series = [
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 100, 120
+    ]
+
+    assert_equal expected_spending_series, snapshot[:spending_series].values.map(&:value).map(&:amount)
+
+    expected_savings_rate_series = [
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 1, 0.8, 0.76
+    ]
+
+    assert_equal expected_savings_rate_series, snapshot[:savings_rate_series].values.map(&:value).map { |v| v.round(2) }
+  end
+
+  private
+
+    def create_account(attributes = {})
+      account = @family.accounts.create! name: "Test", currency: "USD", **attributes
+      account
+    end
 end

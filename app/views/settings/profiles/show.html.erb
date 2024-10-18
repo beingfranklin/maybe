@@ -5,10 +5,10 @@
   <h1 class="text-gray-900 text-xl font-medium mb-4"><%= t(".page_title") %></h1>
   <div class="space-y-4">
     <%= settings_section title: t(".profile_title"), subtitle: t(".profile_subtitle") do %>
-      <%= form_with model: Current.user, url: settings_profile_path, html: {data: { controller: "profile-image-preview" }} do |form| %>
+      <%= styled_form_with model: Current.user, url: settings_profile_path, class: "space-y-4", data: { controller: "profile-image-preview" } do |form| %>
         <div class="flex items-center gap-4">
           <div class="relative flex justify-center items-center bg-gray-50 w-24 h-24 rounded-full border border-alpha-black-25">
-            <div data-profile-image-preview-target="imagePreview">
+            <div data-profile-image-preview-target="imagePreview" class="h-full w-full flex justify-center items-center">
               <% profile_image_attached = Current.user.profile_image.attached? %>
               <% if profile_image_attached %>
                 <div class="h-24 w-24">
@@ -26,7 +26,7 @@
           <div class="space-y-3">
             <p><%= t(".profile_image_type") %></p>
             <%= form.label :profile_image, t(".profile_image_choose"), class: "inline-block cursor-pointer px-3 py-2 bg-gray-50 text-gray-900 rounded-md text-sm font-medium" %>
-            <%= form.file_field :profile_image, accept: "wimage/png, image/jpeg, image/gif", class: "hidden px-3 py-2 bg-gray-50 text-gray-900 rounded-md text-sm font-medium", data: {profile_image_preview_target: "fileField", action: "change->profile-image-preview#preview"} %>
+            <%= form.file_field :profile_image, accept: "image/png, image/jpeg", class: "hidden px-3 py-2 bg-gray-50 text-gray-900 rounded-md text-sm font-medium", data: {profile_image_preview_target: "fileField", action: "change->profile-image-preview#preview"} %>
             <%= form.hidden_field :delete_profile_image, value: false, data: {profile_image_preview_target: "deleteField"} %>
           </div>
         </div>
@@ -36,14 +36,14 @@
             <%= form.text_field :last_name, placeholder: "Last name", value: Current.user.last_name, label: true %>
           </div>
           <div class="flex justify-end mt-4">
-            <%= form.submit t(".save"), class: "bg-gray-900 text-white rounded-lg px-3 py-2" %>
+            <%= form.submit t(".save"), class: "bg-gray-900 hover:bg-gray-700 cursor-pointer text-white rounded-lg px-3 py-2" %>
           </div>
         </div>
       <% end %>
     <% end %>
     <%= settings_section title: t(".household_title"), subtitle: t(".household_subtitle") do %>
       <div class="space-y-4">
-        <%= form_with model: Current.user, url: settings_profile_path, html: { class: "space-y-4", data: { controller: "auto-submit-form", "auto-submit-form-trigger-event-value": "blur" } } do |form| %>
+        <%= styled_form_with model: Current.user, url: settings_profile_path, class: "space-y-4", data: { controller: "auto-submit-form", "auto-submit-form-trigger-event-value": "blur" } do |form| %>
           <%= form.fields_for :family_attributes do |family_fields| %>
             <%= family_fields.text_field :name, placeholder: t(".household_form_input_placeholder"), value: Current.family.name, label: t(".household_form_label"), disabled: !Current.user.admin?, "data-auto-submit-form-target": "auto" %>
           <% end %>
@@ -60,12 +60,6 @@
             <div class="rounded-md bg-gray-100 px-1.5 py-0.5">
               <p class="uppercase text-gray-500 font-medium text-xs"><%= Current.user.role %></p>
             </div>
-          </div>
-          <div>
-            <button disabled class="cursor-not-allowed flex gap-1 justify-center w-full block items-center px-4 py-2">
-              <%= lucide_icon "plus", class: "w-4 h-4 text-gray-500" %>
-              <span class="text-gray-500 text-sm font-medium"><%= t(".add_member") %></span>
-            </button>
           </div>
         </div>
       </div>
@@ -89,7 +83,6 @@
       </div>
     <% end %>
   </div>
-  <div class="flex gap-4">
-    <%= next_setting("Preferences", settings_preferences_path) %>
-  </div>
+
+  <%= settings_nav_footer %>
 </div>

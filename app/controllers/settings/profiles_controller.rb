@@ -1,4 +1,4 @@
-class Settings::ProfilesController < ApplicationController
+class Settings::ProfilesController < SettingsController
   def show
   end
 
@@ -17,13 +17,13 @@ class Settings::ProfilesController < ApplicationController
     if Current.user.update(user_params_with_family)
       redirect_to settings_profile_path, notice: t(".success")
     else
-      redirect_to settings_profile_path, alert: t(".file_size_error")
+      redirect_to settings_profile_path, alert: Current.user.errors.full_messages.to_sentence
     end
   end
 
   def destroy
     if Current.user.deactivate
-      logout
+      Current.session.destroy
       redirect_to root_path, notice: t(".success")
     else
       redirect_to settings_profile_path, alert: Current.user.errors.full_messages.to_sentence
@@ -31,9 +31,8 @@ class Settings::ProfilesController < ApplicationController
   end
 
   private
-
-  def user_params
-    params.require(:user).permit(:first_name, :last_name, :profile_image,
-                                 family_attributes: [ :name, :id ])
-  end
+    def user_params
+      params.require(:user).permit(:first_name, :last_name, :profile_image,
+                                   family_attributes: [ :name, :id ])
+    end
 end

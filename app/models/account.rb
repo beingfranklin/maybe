@@ -1,86 +1,131 @@
 class Account < ApplicationRecord
-  include Syncable
-  include Monetizable
+  include Syncable, Monetizable, Issuable
 
-  validates :family, presence: true
+  validates :name, :balance, :currency, presence: true
 
-  broadcasts_refreshes
   belongs_to :family
+  belongs_to :institution, optional: true
+  belongs_to :import, optional: true
+
+  has_many :import_mappings, as: :mappable, dependent: :destroy, class_name: "Import::Mapping"
+  has_many :entries, dependent: :destroy, class_name: "Account::Entry"
+  has_many :transactions, through: :entries, source: :entryable, source_type: "Account::Transaction"
+  has_many :valuations, through: :entries, source: :entryable, source_type: "Account::Valuation"
+  has_many :trades, through: :entries, source: :entryable, source_type: "Account::Trade"
+  has_many :holdings, dependent: :destroy
   has_many :balances, dependent: :destroy
-  has_many :valuations, dependent: :destroy
-  has_many :transactions, dependent: :destroy
+  has_many :syncs, dependent: :destroy
+  has_many :issues, as: :issuable, dependent: :destroy
 
   monetize :balance
 
-  enum :status, { ok: "ok", syncing: "syncing", error: "error" }, validate: true
+  enum :classification, { asset: "asset", liability: "liability" }, validate: { allow_nil: true }
 
   scope :active, -> { where(is_active: true) }
   scope :assets, -> { where(classification: "asset") }
   scope :liabilities, -> { where(classification: "liability") }
   scope :alphabetically, -> { order(:name) }
+  scope :ungrouped, -> { where(institution_id: nil) }
 
   delegated_type :accountable, types: Accountable::TYPES, dependent: :destroy
 
-  def self.ransackable_attributes(auth_object = nil)
-    %w[name id]
-  end
+  accepts_nested_attributes_for :accountable
 
-  def balance_on(date)
-    balances.where("date <= ?", date).order(date: :desc).first&.balance
-  end
+  delegate :value, :series, to: :accountable
 
-  # e.g. Wise, Revolut accounts that have transactions in multiple currencies
-  def multi_currency?
-    currencies = [ valuations.pluck(:currency), transactions.pluck(:currency) ].flatten.uniq
-    currencies.count > 1
-  end
+  class << self
+    def by_group(period: Period.all, currency: Money.default_currency.iso_code)
+      grouped_accounts = { assets: ValueGroup.new("Assets", currency), liabilities: ValueGroup.new("Liabilities", currency) }
 
-  # e.g. Accounts denominated in currency other than family currency
-  def foreign_currency?
-    currency != family.currency
-  end
-
-  def self.by_provider
-    # TODO: When 3rd party providers are supported, dynamically load all providers and their accounts
-    [ { name: "Manual accounts", accounts: all.order(balance: :desc).group_by(&:accountable_type) } ]
-  end
-
-  def self.some_syncing?
-    exists?(status: "syncing")
-  end
-
-
-  def series(period: Period.all, currency: self.currency)
-    balance_series = balances.in_period(period).where(currency: Money::Currency.new(currency).iso_code)
-
-    if balance_series.empty? && period.date_range.end == Date.current
-      converted_balance = balance_money.exchange_to(currency)
-      if converted_balance
-        TimeSeries.new([ { date: Date.current, value: converted_balance } ])
-      else
-        TimeSeries.new([])
-      end
-    else
-      TimeSeries.from_collection(balance_series, :balance_money)
-    end
-  end
-
-  def self.by_group(period: Period.all, currency: Money.default_currency)
-    grouped_accounts = { assets: ValueGroup.new("Assets", currency), liabilities: ValueGroup.new("Liabilities", currency) }
-
-    Accountable.by_classification.each do |classification, types|
-      types.each do |type|
-        group = grouped_accounts[classification.to_sym].add_child_group(type, currency)
-        self.where(accountable_type: type).each do |account|
-          value_node = group.add_value_node(
-            account,
-            account.balance_money.exchange_to(currency) || Money.new(0, currency),
-            account.series(period: period, currency: currency)
-          )
+      Accountable.by_classification.each do |classification, types|
+        types.each do |type|
+          accounts = self.where(accountable_type: type)
+          if accounts.any?
+            group = grouped_accounts[classification.to_sym].add_child_group(type, currency)
+            accounts.each do |account|
+              group.add_value_node(
+                account,
+                account.balance_money.exchange_to(currency, fallback_rate: 0),
+                account.series(period: period, currency: currency)
+              )
+            end
+          end
         end
       end
+
+      grouped_accounts
     end
 
-    grouped_accounts
+    def create_with_optional_start_balance!(attributes:, start_date: nil, start_balance: nil)
+      transaction do
+        attributes[:accountable_attributes] ||= {} # Ensure accountable is created
+        account = new(attributes)
+
+        # Always initialize an account with a valuation entry to begin tracking value history
+        account.entries.build \
+          date: Date.current,
+          amount: account.balance,
+          currency: account.currency,
+          entryable: Account::Valuation.new
+
+        if start_date.present? && start_balance.present?
+          account.entries.build \
+            date: start_date,
+            amount: start_balance,
+            currency: account.currency,
+            entryable: Account::Valuation.new
+        end
+
+        account.save!
+        account
+      end
+    end
+  end
+
+  def original_balance
+    balance_amount = balances.chronological.first&.balance || balance
+    Money.new(balance_amount, currency)
+  end
+
+  def owns_ticker?(ticker)
+    security_id = Security.find_by(ticker: ticker)&.id
+    entries.account_trades
+           .joins("JOIN account_trades ON account_entries.entryable_id = account_trades.id")
+           .where(account_trades: { security_id: security_id }).any?
+  end
+
+  def favorable_direction
+    classification == "asset" ? "up" : "down"
+  end
+
+  def update_with_sync!(attributes)
+    transaction do
+      update!(attributes)
+      update_balance!(attributes[:balance]) if attributes[:balance]
+    end
+
+    sync_later
+  end
+
+  def update_balance!(balance)
+    valuation = entries.account_valuations.find_by(date: Date.current)
+
+    if valuation
+      valuation.update! amount: balance
+    else
+      entries.create! \
+        date: Date.current,
+        amount: balance,
+        currency: currency,
+        entryable: Account::Valuation.new
+    end
+  end
+
+  def holding_qty(security, date: Date.current)
+    entries.account_trades
+           .joins("JOIN account_trades ON account_entries.entryable_id = account_trades.id")
+           .where(account_trades: { security_id: security.id })
+           .where("account_entries.date <= ?", date)
+           .sum("account_trades.qty")
   end
 end

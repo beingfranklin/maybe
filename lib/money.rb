@@ -1,8 +1,22 @@
 class Money
-  include Comparable, Arithmetic
+  include Comparable, Arithmetic, Formatting
   include ActiveModel::Validations
 
-  attr_reader :amount, :currency
+  class ConversionError < StandardError
+    attr_reader :from_currency, :to_currency, :date
+
+    def initialize(from_currency:, to_currency:, date:)
+      @from_currency = from_currency
+      @to_currency = to_currency
+      @date = date
+
+      error_message = message || "Couldn't find exchange rate from #{from_currency} to #{to_currency} on #{date}"
+
+      super(error_message)
+    end
+  end
+
+  attr_reader :amount, :currency, :store
 
   validate :source_must_be_of_known_type
 
@@ -16,45 +30,29 @@ class Money
     end
   end
 
-  def initialize(obj, currency = Money.default_currency)
+  def initialize(obj, currency = Money.default_currency, store: ExchangeRate)
     @source = obj
     @amount = obj.is_a?(Money) ? obj.amount : BigDecimal(obj.to_s)
     @currency = obj.is_a?(Money) ? obj.currency : Money::Currency.new(currency)
+    @store = store
 
     validate!
   end
 
-  # TODO: Replace with injected rate store
-  def exchange_to(other_currency, date = Date.current)
-    if currency == Money::Currency.new(other_currency)
+  def exchange_to(other_currency, date: Date.current, fallback_rate: nil)
+    iso_code = currency.iso_code
+    other_iso_code = Money::Currency.new(other_currency).iso_code
+
+    if iso_code == other_iso_code
       self
-    elsif rate = ExchangeRate.find_rate(from: currency, to: other_currency, date: date)
-      Money.new(amount * rate.rate, other_currency)
-    end
-  end
-
-  def cents_str(precision = currency.default_precision)
-    format_str = "%.#{precision}f"
-    amount_str = format_str % amount
-    parts = amount_str.split(currency.separator)
-
-    if parts.length < 2
-      ""
     else
-      parts.last.ljust(precision, "0")
+      exchange_rate = store.find_rate(from: iso_code, to: other_iso_code, date: date)&.rate || fallback_rate
+
+      raise ConversionError.new(from_currency: iso_code, to_currency: other_iso_code, date: date) unless exchange_rate
+
+      Money.new(amount * exchange_rate, other_iso_code)
     end
   end
-
-  # Use `format` for basic formatting only.
-  # Use the Rails number_to_currency helper for more advanced formatting.
-  def format
-    whole_part, fractional_part = sprintf("%.#{currency.default_precision}f", amount).split(".")
-    whole_with_delimiters = whole_part.chars.to_a.reverse.each_slice(3).map(&:join).join(currency.delimiter).reverse
-    formatted_amount = "#{whole_with_delimiters}#{currency.separator}#{fractional_part}"
-
-    currency.default_format.gsub("%n", formatted_amount).gsub("%u", currency.symbol)
-  end
-  alias_method :to_s, :format
 
   def as_json
     { amount: amount, currency: currency.iso_code }.as_json
@@ -74,15 +72,6 @@ class Money
         amount_comparison
       end
     end
-  end
-
-  def default_format_options
-    {
-      unit: currency.symbol,
-      precision: currency.default_precision,
-      delimiter: currency.delimiter,
-      separator: currency.separator
-    }
   end
 
   private

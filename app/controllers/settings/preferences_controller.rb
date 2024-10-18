@@ -1,4 +1,4 @@
-class Settings::PreferencesController < ApplicationController
+class Settings::PreferencesController < SettingsController
   def edit
   end
 
@@ -14,12 +14,13 @@ class Settings::PreferencesController < ApplicationController
       redirect_to settings_preferences_path, notice: t(".success")
     else
       redirect_to settings_preferences_path, notice: t(".success")
-      render :edit, status: :unprocessable_entity
+      render :show, status: :unprocessable_entity
     end
   end
 
   private
+
     def preference_params
-      params.require(:user).permit(family_attributes: [ :id, :currency ])
+      params.require(:user).permit(family_attributes: [ :id, :currency, :locale ])
     end
 end

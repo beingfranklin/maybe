@@ -1,0 +1,80 @@
+---
+en:
+  transactions:
+    bulk_delete:
+      success: "%{count} transactions deleted"
+    bulk_edit:
+      cancel: Cancel
+      category_label: Category
+      category_placeholder: Select a category
+      date_label: Date
+      details: Details
+      merchant_label: Merchant
+      merchant_placeholder: Select a merchant
+      note_label: Notes
+      note_placeholder: Enter a note that will be applied to selected transactions
+      overview: Overview
+      save: Save
+    bulk_update:
+      success: "%{count} transactions updated"
+    create:
+      success: New transaction created successfully
+    form:
+      account: Account
+      account_prompt: Select an Account
+      amount: Amount
+      category: Category
+      category_prompt: Select a Category
+      date: Date
+      description: Description
+      description_placeholder: Describe transaction
+      expense: Expense
+      income: Income
+      submit: Add transaction
+      transfer: Transfer
+    header:
+      edit_categories: Edit categories
+      edit_imports: Edit imports
+      edit_merchants: Edit merchants
+      edit_tags: Edit tags
+      import: Import
+    index:
+      transaction: transaction
+    mark_transfers:
+      success: Marked as transfer
+    new:
+      new_transaction: New transaction
+    searches:
+      filters:
+        amount_filter:
+          equal_to: Equal to
+          greater_than: Greater than
+          less_than: Less than
+          placeholder: '0'
+        badge:
+          expense: Expense
+          income: Income
+          on_or_after: on or after %{date}
+          on_or_before: on or before %{date}
+          transfer: Transfer
+        type_filter:
+          expense: Expense
+          income: Income
+          transfer: Transfer
+      menu:
+        account_filter: Account
+        amount_filter: Amount
+        apply: Apply
+        cancel: Cancel
+        category_filter: Category
+        clear_filters: Clear filters
+        date_filter: Date
+        merchant_filter: Merchant
+        tag_filter: Tag
+        type_filter: Type
+      search:
+        equal_to: equal to
+        greater_than: greater than
+        less_than: less than
+    unmark_transfers:
+      success: Transfer removed

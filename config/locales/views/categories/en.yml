@@ -1,0 +1,22 @@
+---
+en:
+  categories:
+    category:
+      delete: Delete category
+      edit: Edit category
+    create:
+      success: New transaction category created successfully
+    edit:
+      edit: Edit category
+    form:
+      placeholder: Category name
+    index:
+      categories: Categories
+      empty: No categories found
+      new: New category
+    menu:
+      loading: Loading...
+    new:
+      new_category: New category
+    update:
+      success: Transaction category updated successfully

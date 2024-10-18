@@ -1,11 +1,20 @@
-# Test ENV setup:
-# By default, all features should be disabled
-# Use the `with_env_overrides` helper to enable features for individual tests
-ENV["SELF_HOSTING_ENABLED"] = "false"
+if ENV["COVERAGE"] == "true"
+  require "simplecov"
+  SimpleCov.start "rails" do
+    enable_coverage :branch
+  end
+end
+
+require_relative "../config/environment"
+
+ENV["SELF_HOSTED"] = "false"
 ENV["UPGRADES_ENABLED"] = "false"
 ENV["RAILS_ENV"] ||= "test"
 
-require_relative "../config/environment"
+# Fixes Segfaults on M1 Macs when running tests in parallel (temporary workaround)
+# https://github.com/ged/ruby-pg/issues/538#issuecomment-1591629049
+ENV["PGGSSENCMODE"] = "disable"
+
 require "rails/test_help"
 require "minitest/mock"
 require "minitest/autorun"
@@ -22,14 +31,25 @@ end
 module ActiveSupport
   class TestCase
     # Run tests in parallel with specified workers
-    parallelize(workers: :number_of_processors)
+    parallelize(workers: :number_of_processors) unless ENV["DISABLE_PARALLELIZATION"] == "true"
+
+    # https://github.com/simplecov-ruby/simplecov/issues/718#issuecomment-538201587
+    if ENV["COVERAGE"] == "true"
+      parallelize_setup do |worker|
+        SimpleCov.command_name "#{SimpleCov.command_name}-#{worker}"
+      end
+
+      parallelize_teardown do |worker|
+        SimpleCov.result
+      end
+    end
 
     # Setup all fixtures in test/fixtures/*.yml for all tests in alphabetical order.
     fixtures :all
 
     # Add more helper methods to be used by all tests here...
     def sign_in(user)
-      post session_path, params: { email: user.email, password: "password" }
+      post sessions_path, params: { email: user.email, password: "password" }
     end
 
     def with_env_overrides(overrides = {}, &block)

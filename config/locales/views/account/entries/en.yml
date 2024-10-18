@@ -1,0 +1,13 @@
+---
+en:
+  account:
+    entries:
+      destroy:
+        success: Entry deleted
+      empty:
+        description: Try adding an entry, editing filters or refining your search
+        title: No entries found
+      loading:
+        loading: Loading entries...
+      update:
+        success: Entry updated

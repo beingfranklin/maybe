@@ -1,131 +1,100 @@
 require "test_helper"
-require "csv"
 
 class AccountTest < ActiveSupport::TestCase
-  def setup
-    @account = accounts(:checking)
+  include ActiveJob::TestHelper
+
+  setup do
+    @account = accounts(:depository)
     @family = families(:dylan_family)
-    @snapshots = CSV.read("test/fixtures/family/expected_snapshots.csv", headers: true).map do |row|
-      {
-        "date" => (Date.current + row["date_offset"].to_i.days).to_date,
-        "assets" => row["assets"],
-        "liabilities" => row["liabilities"],
-        "Account::Depository" => row["depositories"],
-        "Account::Credit" => row["credits"],
-        "Account::OtherAsset" => row["other_assets"]
-      }
+  end
+
+  test "can sync later" do
+    assert_enqueued_with(job: AccountSyncJob, args: [ @account, start_date: Date.current ]) do
+      @account.sync_later start_date: Date.current
     end
   end
 
-  test "new account should be valid" do
-    assert @account.valid?
-    assert_not_nil @account.accountable_id
-    assert_not_nil @account.accountable
+  test "can sync" do
+    start_date = 10.days.ago.to_date
+
+    mock_sync = mock("Account::Sync")
+    mock_sync.expects(:run).once
+
+    Account::Sync.expects(:for).with(@account, start_date: start_date).returns(mock_sync).once
+
+    @account.sync start_date: start_date
   end
 
-  test "recognizes foreign currency account" do
-    regular_account = accounts(:checking)
-    foreign_account = accounts(:eur_checking)
-    assert_not regular_account.foreign_currency?
-    assert foreign_account.foreign_currency?
+  test "needs sync if account has not synced today" do
+    assert @account.needs_sync?
   end
 
-  test "recognizes multi currency account" do
-    regular_account = accounts(:checking)
-    multi_currency_account = accounts(:multi_currency)
-    assert_not regular_account.multi_currency?
-    assert multi_currency_account.multi_currency?
-  end
-
-  test "multi currency and foreign currency are different concepts" do
-    multi_currency_account = accounts(:multi_currency)
-    assert_equal multi_currency_account.family.currency, multi_currency_account.currency
-    assert multi_currency_account.multi_currency?
-    assert_not multi_currency_account.foreign_currency?
-  end
-
-  test "syncs regular account" do
-    @account.sync
-    assert_equal "ok", @account.status
-    assert_equal 31, @account.balances.count
-  end
-
-  test "syncs foreign currency account" do
-    account = accounts(:eur_checking)
-    account.sync
-    assert_equal "ok", account.status
-    assert_equal 31, account.balances.where(currency: "USD").count
-    assert_equal 31, account.balances.where(currency: "EUR").count
-  end
   test "groups accounts by type" do
-    @family.accounts.each do |account|
-      account.sync
-    end
-
     result = @family.accounts.by_group(period: Period.all)
-
-    expected_assets = @snapshots.last["assets"].to_d
-    expected_liabilities = @snapshots.last["liabilities"].to_d
-
     assets = result[:assets]
     liabilities = result[:liabilities]
 
     assert_equal @family.assets, assets.sum
     assert_equal @family.liabilities, liabilities.sum
 
-    depositories = assets.children.find { |group| group.name == "Account::Depository" }
-    properties = assets.children.find { |group| group.name == "Account::Property" }
-    vehicles = assets.children.find { |group| group.name == "Account::Vehicle" }
-    investments = assets.children.find { |group| group.name == "Account::Investment" }
-    other_assets = assets.children.find { |group| group.name == "Account::OtherAsset" }
+    depositories = assets.children.find { |group| group.name == "Depository" }
+    properties = assets.children.find { |group| group.name == "Property" }
+    vehicles = assets.children.find { |group| group.name == "Vehicle" }
+    investments = assets.children.find { |group| group.name == "Investment" }
+    other_assets = assets.children.find { |group| group.name == "OtherAsset" }
 
-    credits = liabilities.children.find { |group| group.name == "Account::Credit" }
-    loans = liabilities.children.find { |group| group.name == "Account::Loan" }
-    other_liabilities = liabilities.children.find { |group| group.name == "Account::OtherLiability" }
+    credits = liabilities.children.find { |group| group.name == "CreditCard" }
+    loans = liabilities.children.find { |group| group.name == "Loan" }
+    other_liabilities = liabilities.children.find { |group| group.name == "OtherLiability" }
 
-    assert_equal 4, depositories.children.count
-    assert_equal 0, properties.children.count
-    assert_equal 0, vehicles.children.count
-    assert_equal 0, investments.children.count
+    assert_equal 1, depositories.children.count
+    assert_equal 1, properties.children.count
+    assert_equal 1, vehicles.children.count
+    assert_equal 1, investments.children.count
     assert_equal 1, other_assets.children.count
 
     assert_equal 1, credits.children.count
-    assert_equal 0, loans.children.count
-    assert_equal 0, other_liabilities.children.count
+    assert_equal 1, loans.children.count
+    assert_equal 1, other_liabilities.children.count
   end
 
-  test "generates series with last balance equal to current account balance" do
-    # If account hasn't been synced, series falls back to a single point with the current balance
-    assert_equal @account.balance_money, @account.series.last.value
-
-    @account.sync
-
-    # Synced series will always have final balance equal to the current account balance
-    assert_equal @account.balance_money, @account.series.last.value
+  test "generates balance series" do
+    assert_equal 2, @account.series.values.count
   end
 
-  test "generates empty series for foreign currency if no exchange rate" do
-    account = accounts(:eur_checking)
-
-    # We know EUR -> NZD exchange rate is not available in fixtures
-    assert_equal 0, account.series(currency: "NZD").values.count
+  test "generates balance series with single value if no balances" do
+    @account.balances.delete_all
+    assert_equal 1, @account.series.values.count
   end
 
-  test "should destroy dependent transactions" do
-    assert_difference("Transaction.count", -@account.transactions.count) do
-      @account.destroy
+  test "generates balance series in period" do
+    @account.balances.delete_all
+    @account.balances.create! date: 31.days.ago.to_date, balance: 5000, currency: "USD" # out of period range
+    @account.balances.create! date: 30.days.ago.to_date, balance: 5000, currency: "USD" # in range
+
+    assert_equal 1, @account.series(period: Period.last_30_days).values.count
+  end
+
+  test "generates empty series if no balances and no exchange rate" do
+    with_env_overrides SYNTH_API_KEY: nil do
+      assert_equal 0, @account.series(currency: "NZD").values.count
     end
   end
 
-  test "should destroy dependent balances" do
-    assert_difference("Account::Balance.count", -@account.balances.count) do
-      @account.destroy
-    end
+  test "calculates shares owned of holding for date" do
+    account = accounts(:investment)
+    security = securities(:aapl)
+
+    assert_equal 10, account.holding_qty(security, date: Date.current)
+    assert_equal 10, account.holding_qty(security, date: 1.day.ago.to_date)
+    assert_equal 0, account.holding_qty(security, date: 2.days.ago.to_date)
   end
 
-  test "should destroy dependent valuations" do
-    assert_difference("Valuation.count", -@account.valuations.count) do
-      @account.destroy
+  test "can observe missing price" do
+    account = accounts(:investment)
+
+    assert_difference -> { account.issues.count } do
+      account.observe_missing_price(ticker: "AAPL", date: Date.current)
     end
   end
 end

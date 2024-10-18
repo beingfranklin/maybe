@@ -52,6 +52,39 @@ module.exports = {
           to: { "stroke-dashoffset": 0 },
         },
       },
+      typography: (theme) => ({
+        DEFAULT: {
+          css: {
+            maxWidth: "none",
+            h2: {
+              fontSize: theme("fontSize.xl"),
+              fontWeight: theme("fontWeight.medium"),
+            },
+            h3: {
+              fontSize: theme("fontSize.lg"),
+              fontWeight: theme("fontWeight.medium"),
+            },
+            li: {
+              margin: 0,
+            },
+            details: {
+              borderRadius: "12px",
+              marginBottom: "0.875rem",
+              marginTop: "0.875rem",
+            },
+            summary: {
+              display: "flex",
+              alignItems: "center",
+              columnGap: "0.25rem",
+            },
+            video: {
+              margin: 0,
+              borderBottomLeftRadius: "12px",
+              borderBottomRightRadius: "12px",
+            },
+          },
+        },
+      }),
     },
   },
   plugins: [

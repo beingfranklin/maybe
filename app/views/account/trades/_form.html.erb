@@ -1,0 +1,34 @@
+<%# locals: (entry:) %>
+
+<%= styled_form_with data: { turbo_frame: "_top", controller: "trade-form" },
+                     scope: :account_entry,
+                     url: account_trades_path(entry.account) do |form| %>
+  <div class="space-y-4">
+    <div class="space-y-2">
+      <%= form.select :type, options_for_select([%w[Buy buy], %w[Sell sell], %w[Deposit transfer_in], %w[Withdrawal transfer_out], %w[Interest interest]], "buy"), { label: t(".type") }, { data: { "trade-form-target": "typeInput" } } %>
+      <div data-trade-form-target="tickerInput">
+        <%= form.text_field :ticker, value: nil, label: t(".holding"), placeholder: t(".ticker_placeholder") %>
+      </div>
+
+      <%= form.date_field :date, label: true %>
+
+      <div data-trade-form-target="amountInput" hidden>
+        <%= form.money_field :amount, label: t(".amount"), disable_currency: true %>
+      </div>
+
+      <div data-trade-form-target="transferAccountInput" hidden>
+        <%= form.collection_select :transfer_account_id, Current.family.accounts.alphabetically, :id, :name, { prompt: t(".account_prompt"), label: t(".account") } %>
+      </div>
+
+      <div data-trade-form-target="qtyInput">
+        <%= form.number_field :qty, label: t(".qty"), placeholder: "10", min: 0.000000000000000001, step: "any" %>
+      </div>
+
+      <div data-trade-form-target="priceInput">
+        <%= form.money_field :price, label: t(".price"), disable_currency: true %>
+      </div>
+    </div>
+
+    <%= form.submit t(".submit") %>
+  </div>
+<% end %>

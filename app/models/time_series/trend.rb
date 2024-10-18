@@ -1,16 +1,15 @@
 class TimeSeries::Trend
   include ActiveModel::Validations
 
-  attr_reader :current, :previous
-
-  delegate :favorable_direction, to: :series
+  attr_reader :current, :previous, :favorable_direction
 
   validate :values_must_be_of_same_type, :values_must_be_of_known_type
 
-  def initialize(current:, previous:, series: nil)
+  def initialize(current:, previous:, series: nil, favorable_direction: nil)
     @current = current
     @previous = previous
     @series = series
+    @favorable_direction = get_favorable_direction(favorable_direction)
 
     validate!
   end
@@ -25,6 +24,17 @@ class TimeSeries::Trend
     end.inquiry
   end
 
+  def color
+    case direction
+    when "up"
+      favorable_direction.down? ? red_hex : green_hex
+    when "down"
+      favorable_direction.down? ? green_hex : red_hex
+    else
+      gray_hex
+    end
+  end
+
   def value
     if previous.nil?
       current.is_a?(Money) ? Money.new(0) : 0
@@ -34,7 +44,7 @@ class TimeSeries::Trend
   end
 
   def percent
-    if previous.nil?
+    if previous.nil? || (previous.zero? && current.zero?)
       0.0
     elsif previous.zero?
       Float::INFINITY
@@ -56,22 +66,35 @@ class TimeSeries::Trend
   end
 
   private
+
     attr_reader :series
+
+    def red_hex
+      "#F13636" # red-500
+    end
+
+    def green_hex
+      "#10A861" # green-600
+    end
+
+    def gray_hex
+      "#737373" # gray-500
+    end
 
     def values_must_be_of_same_type
       unless current.class == previous.class || [ previous, current ].any?(&:nil?)
-        errors.add :current, "must be of the same type as previous"
-        errors.add :previous, "must be of the same type as current"
+        errors.add :current, :must_be_of_the_same_type_as_previous
+        errors.add :previous, :must_be_of_the_same_type_as_current
       end
     end
 
     def values_must_be_of_known_type
       unless current.is_a?(Money) || current.is_a?(Numeric) || current.nil?
-        errors.add :current, "must be of type Money, Numeric, or nil"
+        errors.add :current, :must_be_of_type_money_numeric_or_nil
       end
 
       unless previous.is_a?(Money) || previous.is_a?(Numeric) || previous.nil?
-        errors.add :previous, "must be of type Money, Numeric, or nil"
+        errors.add :previous, :must_be_of_type_money_numeric_or_nil
       end
     end
 
@@ -89,5 +112,10 @@ class TimeSeries::Trend
       else
         obj
       end
+    end
+
+    def get_favorable_direction(favorable_direction)
+      direction = favorable_direction.presence || series&.favorable_direction
+      (direction.presence_in(TimeSeries::DIRECTIONS) || "up").inquiry
     end
 end

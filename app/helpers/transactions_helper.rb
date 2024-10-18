@@ -1,24 +1,38 @@
 module TransactionsHelper
-  def transaction_filters
+  def transaction_search_filters
     [
-      { name: "Account", partial: "account_filter", icon: "layers" },
-      { name: "Date", partial: "date_filter", icon: "calendar" },
-      { name: "Type", partial: "type_filter", icon: "shapes" },
-      { name: "Amount", partial: "amount_filter", icon: "hash" },
-      { name: "Category", partial: "category_filter", icon: "tag" },
-      { name: "Merchant", partial: "merchant_filter", icon: "store" }
+      { key: "account_filter", icon: "layers" },
+      { key: "date_filter", icon: "calendar" },
+      { key: "type_filter", icon: "tag" },
+      { key: "amount_filter", icon: "hash" },
+      { key: "category_filter", icon: "shapes" },
+      { key: "tag_filter", icon: "tags" },
+      { key: "merchant_filter", icon: "store" }
     ]
   end
 
-  def transaction_filter_id(filter)
-    "txn-#{filter[:name].downcase}-filter"
+  def get_transaction_search_filter_partial_path(filter)
+    "transactions/searches/filters/#{filter[:key]}"
   end
 
-  def transaction_filter_by_name(name)
-    transaction_filters.find { |filter| filter[:name] == name }
+  def get_default_transaction_search_filter
+    transaction_search_filters[0]
   end
 
-  def full_width_transaction_row?(route)
-    route != "/"
+  def transactions_path_without_param(param_key, param_value)
+    updated_params = request.query_parameters.deep_dup
+
+    q_params = updated_params[:q] || {}
+
+    current_value = q_params[param_key]
+    if current_value.is_a?(Array)
+      q_params[param_key] = current_value - [ param_value ]
+    else
+      q_params.delete(param_key)
+    end
+
+    updated_params[:q] = q_params
+
+    transactions_path(updated_params)
   end
 end
